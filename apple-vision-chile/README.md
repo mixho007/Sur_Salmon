@@ -51,17 +51,19 @@ images/                       dataset actual (YOLO, 1 clase)
 data/
   01_raw/                     datasets originales
     apple_sorting_original/   dataset 2 con sus 2 clases
-  02_processed/               salida del pipeline (detecciones.csv)
+  02_processed/               salida del pipeline (metricas.csv)
   03_features/                features para ML
 src/
-  vision/                     detector, calibrador, clasificador
+  app.py                      dashboard de inicio (elegir cámara o video)
+  vision/                     detector, panel en vivo, calibrador, clasificador
   ml/                         features, train, evaluate
   utils/                      config, s3_helper
 notebooks/                    01_eda, 02_models, 03_optimization
 scripts/                      descargar y comprimir dataset
 models/                       pesos entrenados (best.pt)
-reports/                      informes y gráficos
+reports/                      informes, gráficos y videos de prueba
 config.yaml                   calibre, HSV, px_por_mm, fuente de video
+iniciar.bat                   abre el dashboard con doble clic
 ```
 
 ## Instalación
@@ -74,20 +76,63 @@ cp .env.example .env          # solo si se usará S3 o Roboflow
 Si usas Roboflow, guarda la clave en `.env` (`ROBOFLOW_API_KEY=...`). No la compartas ni la subas a git.
 
 ## Uso
-1. Entrenar el detector:
-   ```bash
-   yolo detect train data=images/data.yaml model=yolo26n.pt epochs=100 imgsz=640
-   ```
-2. Ajustar `config.yaml` (calibre, HSV, `px_por_mm`, fuente de video).
-3. Generar el CSV: `python -m src.vision.detector --modelo models/best.pt --video ruta.mp4`
-   (salida: `data/02_processed/detecciones.csv`).
-4. Abrir `notebooks/01_eda.ipynb`.
+
+### Dashboard (la forma más simple)
+Haz doble clic en `iniciar.bat`, o desde la terminal:
+```bash
+python -m src.app
+```
+La pantalla de inicio permite:
+1. **Elegir la fuente:** *Cámara conectada* (con número de cámara y botón «Probar cámara») o *Video del equipo* («Elegir archivo…», acepta mp4, avi, mov, mkv y wmv).
+2. **Ajustar** el nombre del lote, la posición de la línea de conteo, la confianza mínima y si se guarda el video con el panel.
+3. **Iniciar conteo:** abre la ventana de video con el panel en vivo. Con la tecla `Q` se termina y se vuelve al dashboard, que muestra el último resultado.
+
+En el video, cada manzana lleva un ID y se **cuenta una sola vez** cuando su centro cruza la línea de conteo (azul, punteada). El panel muestra el total, el desglose por categoría (Buena / Con detalle / No pasa), el calibre configurado y los fps.
+
+Con cámara no hace falta ningún archivo. Con video, el archivo puede estar en cualquier carpeta del equipo.
+
+### Línea de comandos
+```bash
+python -m src.vision.detector --modelo models/best.pt --video ruta.mp4 --lote "Lote 1"
+```
+Opciones: `--linea 0.8` (posición de la línea, fracción del ancho), `--conf 0.25`, `--guardar salida.mp4`, `--sin-ventana`. Sin `--video` usa la fuente de `config.yaml`. Genera `data/02_processed/metricas.csv`.
+
+### Entrenar el detector
+```bash
+yolo detect train data=images/data.yaml model=yolo26n.pt epochs=50 patience=15 imgsz=416 batch=16 device=cpu project=runs name=apple_v1
+```
+Copiar `weights/best.pt` resultante a `models/best.pt`.
+
+### Configuración
+Ajustar `config.yaml` (calibre, HSV, `px_por_mm`, fuente de video). **`px_por_mm` hay que calibrarlo** con un objeto de tamaño conocido en cámara: con el valor por defecto las categorías salen casi todas «No pasa», aunque el conteo total es correcto.
 
 ## Resultados
-*Pendiente: aún no se entrena el modelo.* Al terminar se completará con:
-- mAP50 y mAP50-95, precision y recall sobre `valid` y `test`.
-- Prueba separada solo con frames de cinta.
-- Conteo de manzanas en un video de prueba, comparado con el conteo manual.
+Modelo YOLO26 nano, 50 épocas, `imgsz=416`, CPU (≈55 min).
+
+| Métrica (valid, 190 imágenes) | Valor |
+|---|---|
+| mAP50 | 0.908 |
+| mAP50-95 | 0.596 |
+| Precision | 0.858 |
+| Recall | 0.881 |
+
+**Prueba solo con frames de cinta** (61 fotos, umbral de confianza 0.25):
+
+| Split | Manzanas etiquetadas | Detectadas | Recall |
+|---|---|---|---|
+| train (43) | 85 | 98 | 0.99 |
+| valid (12) | 22 | 28 | 0.95 |
+| test (6) | 11 | 15 | 1.00 |
+
+Las detecciones de más corresponden en su mayoría a **manzanas visibles que no tienen etiqueta** (por ejemplo, parcialmente cortadas por el borde), por lo que la precision real es mayor que la que reflejan estas cifras.
+
+**Limitaciones**
+- Solo 61 imágenes de cinta, todas del mismo video: la prueba es un buen indicio, no una garantía.
+- `valid` es en su mayoría de manzanas apiladas (178 de 190 imágenes), por lo que sus métricas reflejan poco la cinta.
+- Hay 12 imágenes casi duplicadas entre train y valid (fuga menor de datos).
+- El conteo con tracking aún no se valida contra un conteo manual en un video continuo.
+
+**Próximos pasos:** completar las etiquetas faltantes en cinta y re-entrenar, quitar duplicados, sumar video propio de la cinta, calibrar `px_por_mm` y validar el conteo contra un conteo manual.
 
 ## Metodología CRISP-DM
 1. **Comprensión del negocio:** automatizar el conteo y la clasificación de manzanas en plantas de embalaje. Primer paso: conteo.
