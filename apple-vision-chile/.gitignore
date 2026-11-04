@@ -29,3 +29,8 @@ reports/*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Generados por entrenamiento y MLflow
+mlflow.db
+entrenamiento.log
+runs/

@@ -32,7 +32,7 @@ Se usan dos datasets públicos de Roboflow Universe, en formato **YOLOv8** (una 
 - Dataset 2: no es de cinta; sirve para que el modelo aprenda cómo se ve una manzana.
 - Hay muchas más imágenes de montones (697) que de cinta (61). Las métricas de `valid` y `test` reflejan sobre todo montones, no la cinta.
 
-**Dataset descartado:** *Apple Detection on split images* (fotos de dron sobre huertos, cortadas en cuadrículas y con casi todo augmentado). Sigue en `data/01_raw/` como referencia.
+**Dataset descartado:** *Apple Detection on split images* (fotos de dron sobre huertos, cortadas en cuadrículas y con casi todo augmentado). Fue eliminado del proyecto.
 
 ## Preparación realizada
 - Se descargaron ambos datasets con la API de Roboflow.
