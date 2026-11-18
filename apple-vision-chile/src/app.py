@@ -12,7 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 import cv2
 
 from src.utils.config import RAIZ, cargar_config
-from src.vision.detector import procesar
+from src.vision.detector import procesar, procesar_imagen
 
 MODELO = RAIZ / "models" / "best.pt"
 CARPETA_REPORTES = RAIZ / "reports"
@@ -29,12 +29,13 @@ class App:
         self.root = tk.Tk()
         self.root.title("AppleVision Chile")
         self.root.configure(bg=FONDO)
-        self.root.geometry("720x760")
-        self.root.minsize(660, 700)
+        self.root.geometry("720x860")
+        self.root.minsize(660, 800)
 
         self.fuente = tk.StringVar(value="camara")
         self.indice_cam = tk.IntVar(value=0)
         self.ruta_video = tk.StringVar(value="")
+        self.ruta_foto = tk.StringVar(value="")
         self.lote = tk.StringVar(value="Lote 1")
         self.linea = tk.IntVar(value=80)
         self.conf = tk.IntVar(value=25)
@@ -103,6 +104,13 @@ class App:
         ttk.Button(fila_vid, text="Elegir archivo…", command=self._elegir_video).pack(side="right")
         ttk.Entry(t1, textvariable=self.ruta_video, state="readonly").pack(fill="x", pady=(6, 0))
 
+        fila_foto = ttk.Frame(t1, style="Card.TFrame")
+        fila_foto.pack(fill="x", pady=(10, 0))
+        ttk.Radiobutton(fila_foto, text="Foto del equipo", value="foto", variable=self.fuente
+                        ).pack(side="left")
+        ttk.Button(fila_foto, text="Elegir foto…", command=self._elegir_foto).pack(side="right")
+        ttk.Entry(t1, textvariable=self.ruta_foto, state="readonly").pack(fill="x", pady=(6, 0))
+
         # --- 2. Ajustes ---
         t2 = self._tarjeta(cont, "2 · AJUSTES")
         fila = ttk.Frame(t2, style="Card.TFrame")
@@ -156,6 +164,13 @@ class App:
             self.ruta_video.set(ruta)
             self.fuente.set("video")
 
+    def _elegir_foto(self) -> None:
+        ruta = filedialog.askopenfilename(
+            title="Elegir foto", filetypes=[("Imágenes", "*.jpg *.jpeg *.png *.bmp *.webp"), ("Todos", "*.*")])
+        if ruta:
+            self.ruta_foto.set(ruta)
+            self.fuente.set("foto")
+
     def _abrir_camara(self, indice: int):
         # En Windows DirectShow abre más rápido y evita errores con algunas cámaras
         cap = cv2.VideoCapture(indice, cv2.CAP_DSHOW)
@@ -176,6 +191,13 @@ class App:
     def _iniciar(self) -> None:
         if not MODELO.exists():
             messagebox.showerror("Falta el modelo", f"No se encontró el modelo entrenado:\n{MODELO}")
+            return
+        if self.fuente.get() == "foto":
+            ruta = self.ruta_foto.get()
+            if not ruta or not Path(ruta).exists():
+                messagebox.showwarning("Foto", "Elige una foto antes de iniciar.")
+                return
+            self._contar_foto(ruta)
             return
         if self.fuente.get() == "video":
             ruta = self.ruta_video.get()
@@ -209,6 +231,31 @@ class App:
         self.resultado["no_pasa"].set(str(cat.get("no_pasa", 0)))
         self.resultado["ids"].set(str(r["ids_vistos"]))
         self.estado.set("Terminado. Puedes iniciar otro conteo.")
+
+    def _contar_foto(self, ruta: str) -> None:
+        guardar = None
+        if self.guardar.get():
+            CARPETA_REPORTES.mkdir(exist_ok=True)
+            guardar = str(CARPETA_REPORTES / "foto_contada.jpg")
+        self.estado.set("Analizando foto…")
+        self.root.update_idletasks()
+        try:
+            r = procesar_imagen(ruta, str(MODELO), self.cfg, mostrar=True, lote=self.lote.get() or "Foto",
+                                guardar=guardar, conf=self.conf.get() / 100)
+        except Exception as e:  # noqa: BLE001 - se muestra al usuario
+            self.estado.set("Error al procesar")
+            messagebox.showerror("Error", str(e))
+            return
+        self._mostrar_resultado(r)
+        self.estado.set(f"Foto analizada: {r['contadas']} manzanas.")
+
+    def _mostrar_resultado(self, r: dict) -> None:
+        cat = r["categorias"]
+        self.resultado["total"].set(str(r["contadas"]))
+        self.resultado["good"].set(str(cat.get("good", 0)))
+        self.resultado["detalle"].set(str(cat.get("detalle", 0)))
+        self.resultado["no_pasa"].set(str(cat.get("no_pasa", 0)))
+        self.resultado["ids"].set(str(r["ids_vistos"]))
 
     def ejecutar(self) -> None:
         self.root.mainloop()

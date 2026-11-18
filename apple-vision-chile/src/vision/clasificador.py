@@ -31,13 +31,17 @@ def color_ok(hue: float, saturacion: float, cfg: Config) -> bool:
 
 
 def clasificar(diametro_mm: float, hue: float, saturacion: float,
-               aspecto: float, clase_yolo: str, cfg: Config) -> str:
-    """Devuelve 'good', 'detalle' o 'no_pasa'."""
+               aspecto: float, clase_yolo: str, cfg: Config, usar_calibre: bool = True) -> str:
+    """Devuelve 'good', 'detalle' o 'no_pasa'.
+
+    `usar_calibre=False` ignora el diámetro: en una foto cualquiera no se conoce la escala px/mm.
+    """
     if str(clase_yolo).lower() in CLASES_DEFECTO:
         return NO_PASA
 
     # Calibre
-    fuera = max(cfg.calibre_min_mm - diametro_mm, diametro_mm - cfg.calibre_max_mm, 0.0)
+    fuera = (max(cfg.calibre_min_mm - diametro_mm, diametro_mm - cfg.calibre_max_mm, 0.0)
+             if usar_calibre else 0.0)
     if fuera > MARGEN_CALIBRE_MM:
         return NO_PASA
 

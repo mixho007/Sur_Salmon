@@ -30,7 +30,7 @@ _FUENTES: dict = {}
 
 
 def _fuente(tam: float, negrita: bool = False) -> ImageFont.ImageFont:
-    tam = max(int(round(tam)), 8)
+    tam = max(int(round(tam)), 6)
     clave = (tam, negrita)
     if clave not in _FUENTES:
         nombres = (["segoeuib.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf"] if negrita
@@ -47,10 +47,16 @@ def _fuente(tam: float, negrita: bool = False) -> ImageFont.ImageFont:
 
 
 def dibujar_panel(frame: np.ndarray, conteo: dict, cfg: Config, lote: str,
-                  fps: float, vivo: bool = True) -> None:
-    """Dibuja tarjeta de lote y panel de conteo sobre `frame` (BGR, in-place)."""
+                  fps: float, vivo: bool = True, en_pantalla: int = None) -> None:
+    """Dibuja tarjeta de lote y panel de conteo sobre `frame` (BGR, in-place).
+
+    `en_pantalla`: manzanas detectadas a la vez en el frame actual (métrica instantánea).
+    `conteo`: acumulado por categoría de las que ya cruzaron la línea (métrica histórica).
+    Con `en_pantalla=None` (foto fija) se omite el bloque instantáneo y el acumulado se
+    muestra como «Total detectadas».
+    """
     alto, ancho = frame.shape[:2]
-    s = max(ancho / 1000, 0.8)  # el diseño base está pensado para 1000 px de ancho
+    s = max(ancho / 1000, 0.4)  # el diseño base está pensado para 1000 px de ancho
     m = 12 * s
 
     base = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).convert("RGBA")
@@ -66,49 +72,71 @@ def dibujar_panel(frame: np.ndarray, conteo: dict, cfg: Config, lote: str,
            font=_fuente(13 * s), fill=GRIS)
 
     # --- Panel de conteo (arriba derecha) ---
-    pw, ph = 265 * s, 326 * s
-    px = ancho - pw - m
+    mostrar_vivo = en_pantalla is not None
+    pw = min(ancho * 0.35, 265 * s)  # nunca más del 35 % del ancho en imágenes angostas
+    ph = (374 if mostrar_vivo else 342) * s
+    margen_der = 3 * s  # pegado al borde derecho para no tapar las manzanas
+    px = ancho - pw - margen_der
     py = m
+    c_sep = (60, 60, 60, 255)
     d.rounded_rectangle([px, py, px + pw, py + ph], radius=10 * s, fill=FONDO,
                         outline=(70, 70, 70, 255), width=max(int(s), 1))
     d.rounded_rectangle([px, py, px + pw, py + 40 * s], radius=10 * s, fill=FONDO_ENCABEZADO)
     d.ellipse([px + 14 * s, py + 12 * s, px + 30 * s, py + 28 * s], fill=ROJO)
     d.text((px + 40 * s, py + 9 * s), "AppleVision Chile", font=_fuente(16 * s, True), fill=(200, 200, 200))
 
+    y = 48.0
+    if mostrar_vivo:
+        # Bloque 1: manzanas en el frame actual, destacado
+        d.text((px + 14 * s, py + (y + 14) * s), "En pantalla", font=_fuente(16 * s), fill=GRIS)
+        f_vivo = _fuente(38 * s, True)
+        txt = str(en_pantalla)
+        d.text((px + pw - 14 * s - d.textlength(txt, font=f_vivo), py + y * s), txt,
+               font=f_vivo, fill=BLANCO)
+        y += 56
+        d.line([px + 14 * s, py + y * s, px + pw - 14 * s, py + y * s], fill=c_sep, width=1)
+        y += 8
+
+    # Bloque 2: acumulado al cruzar la línea
     total = sum(conteo.get(clave, 0) for _, clave, _ in FILAS)
-    d.text((px + 14 * s, py + 53 * s), "Total detectadas", font=_fuente(14 * s), fill=GRIS)
-    txt = str(total)
+    d.text((px + 14 * s, py + (y + 3) * s), "Cruzaron línea" if mostrar_vivo else "Total detectadas",
+           font=_fuente(14 * s), fill=GRIS)
     f_total = _fuente(20 * s, True)
-    d.text((px + pw - 14 * s - d.textlength(txt, font=f_total), py + 48 * s), txt,
+    txt = str(total)
+    d.text((px + pw - 14 * s - d.textlength(txt, font=f_total), py + y * s), txt,
            font=f_total, fill=BLANCO)
-    d.line([px + 14 * s, py + 84 * s, px + pw - 14 * s, py + 84 * s], fill=(60, 60, 60, 255), width=1)
+    y += 32
+    d.line([px + 14 * s, py + y * s, px + pw - 14 * s, py + y * s], fill=c_sep, width=1)
+    y += 8
 
     f_fila, f_num = _fuente(15 * s), _fuente(18 * s, True)
     ancho_barra = pw - 28 * s
-    for i, (etiqueta, clave, color) in enumerate(FILAS):
-        y0 = py + (92 + i * 44) * s
+    for etiqueta, clave, color in FILAS:
+        y0 = py + y * s
         n = conteo.get(clave, 0)
         d.rounded_rectangle([px + 14 * s, y0 + 4 * s, px + 28 * s, y0 + 18 * s], radius=3 * s, fill=color)
         d.text((px + 38 * s, y0 + 1 * s), etiqueta, font=f_fila, fill=(215, 215, 215))
         d.text((px + pw - 14 * s - d.textlength(str(n), font=f_num), y0 - 2 * s), str(n),
                font=f_num, fill=color)
-        yb = y0 + 28 * s
-        d.rounded_rectangle([px + 14 * s, yb, px + 14 * s + ancho_barra, yb + 7 * s],
+        yb = y0 + 26 * s
+        d.rounded_rectangle([px + 14 * s, yb, px + 14 * s + ancho_barra, yb + 6 * s],
                             radius=3 * s, fill=BARRA_FONDO)
         if total > 0 and n > 0:
-            d.rounded_rectangle([px + 14 * s, yb, px + 14 * s + ancho_barra * n / total, yb + 7 * s],
+            d.rounded_rectangle([px + 14 * s, yb, px + 14 * s + ancho_barra * n / total, yb + 6 * s],
                                 radius=3 * s, fill=color)
+        y += 40
 
-    y_sep = py + 232 * s
-    d.line([px + 14 * s, y_sep, px + pw - 14 * s, y_sep], fill=(60, 60, 60, 255), width=1)
-    d.text((px + 14 * s, py + 240 * s), "Calibre configurado", font=_fuente(13 * s), fill=GRIS)
-    d.text((px + 14 * s, py + 257 * s), f"{cfg.calibre_min_mm:.0f} mm — {cfg.calibre_max_mm:.0f} mm",
+    # Pie: calibre configurado y estado
+    y += 2
+    d.line([px + 14 * s, py + y * s, px + pw - 14 * s, py + y * s], fill=c_sep, width=1)
+    d.text((px + 14 * s, py + (y + 9) * s), "Calibre configurado", font=_fuente(13 * s), fill=GRIS)
+    d.text((px + 14 * s, py + (y + 28) * s), f"{cfg.calibre_min_mm:.0f} mm — {cfg.calibre_max_mm:.0f} mm",
            font=_fuente(16 * s), fill=(215, 215, 215))
-    d.text((px + 14 * s, py + 284 * s), "Estado", font=_fuente(13 * s), fill=GRIS)
+    d.text((px + 14 * s, py + (y + 60) * s), "Estado", font=_fuente(13 * s), fill=GRIS)
     color_estado = VERDE if vivo else GRIS
-    d.ellipse([px + 14 * s, py + 306 * s, px + 26 * s, py + 318 * s], fill=color_estado)
+    d.ellipse([px + 14 * s, py + (y + 83) * s, px + 26 * s, py + (y + 95) * s], fill=color_estado)
     estado = f"En vivo · {fps:.0f} fps" if vivo else "Detenido"
-    d.text((px + 34 * s, py + 301 * s), estado, font=_fuente(14 * s), fill=color_estado)
+    d.text((px + 34 * s, py + (y + 78) * s), estado, font=_fuente(14 * s), fill=color_estado)
 
     salida = Image.alpha_composite(base, capa).convert("RGB")
     frame[:] = cv2.cvtColor(np.asarray(salida), cv2.COLOR_RGB2BGR)
