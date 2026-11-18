@@ -55,7 +55,7 @@ data/
   03_features/                features para ML
 src/
   app.py                      dashboard de inicio (elegir cámara o video)
-  vision/                     detector, panel en vivo, calibrador, clasificador
+  vision/                     detector, panel en vivo, calibrador, clasificador, validar_conteo
   ml/                         features, train, evaluate
   utils/                      config, s3_helper
 notebooks/                    01_eda, 02_models, 03_optimization
@@ -67,13 +67,23 @@ iniciar.bat                   abre el dashboard con doble clic
 ```
 
 ## Instalación
+Requiere Python 3.9 o superior.
 ```bash
 python -m venv .venv
 .venv\Scripts\activate        # Windows
 pip install -r requirements.txt
 cp .env.example .env          # solo si se usará S3 o Roboflow
 ```
-Si usas Roboflow, guarda la clave en `.env` (`ROBOFLOW_API_KEY=...`). No la compartas ni la subas a git.
+Variables necesarias en `.env` según lo que vayas a usar:
+| Variable | Para qué |
+|---|---|
+| `ROBOFLOW_API_KEY` | Descargar datasets con `scripts/descargar_dataset.py` |
+| `AWS_ACCESS_KEY_ID` | Subir/bajar modelos a S3 |
+| `AWS_SECRET_ACCESS_KEY` | Ídem |
+| `AWS_SESSION_TOKEN` | Ídem (AWS Learner Lab) |
+| `AWS_DEFAULT_REGION` | `us-east-1` |
+
+No subas el `.env` real a git (ya está en `.gitignore`).
 
 ## Uso
 
@@ -82,26 +92,60 @@ Haz doble clic en `iniciar.bat`, o desde la terminal:
 ```bash
 python -m src.app
 ```
+
+**Desde Git Bash** (abre el panel; ahí eliges el video del computador y se hace el análisis):
+```bash
+cd /c/Users/rafa/Desktop/apple-vision-chile
+.venv/Scripts/python.exe -m src.app
+```
+En el panel: *Video del equipo* → *Elegir archivo…* → *Iniciar conteo*. El modelo analiza el video, cuenta las manzanas y guarda las métricas en `data/02_processed/metricas.csv`.
 La pantalla de inicio permite:
-1. **Elegir la fuente:** *Cámara conectada* (con número de cámara y botón «Probar cámara») o *Video del equipo* («Elegir archivo…», acepta mp4, avi, mov, mkv y wmv).
+1. **Elegir la fuente:** *Cámara conectada* (con número de cámara y botón «Probar cámara»), *Video del equipo* («Elegir archivo…», acepta mp4, avi, mov, mkv y wmv) o *Foto del equipo* («Elegir foto…», acepta jpg, png, bmp y webp).
 2. **Ajustar** el nombre del lote, la posición de la línea de conteo, la confianza mínima y si se guarda el video con el panel.
 3. **Iniciar conteo:** abre la ventana de video con el panel en vivo. Con la tecla `Q` se termina y se vuelve al dashboard, que muestra el último resultado.
 
-En el video, cada manzana lleva un ID y se **cuenta una sola vez** cuando su centro cruza la línea de conteo (azul, punteada). El panel muestra el total, el desglose por categoría (Buena / Con detalle / No pasa), el calibre configurado y los fps.
+En el video, cada manzana lleva un ID asignado por **ByteTrack** y se **cuenta una sola vez** cuando su centro cruza la línea de conteo (azul, punteada). El panel muestra el total, el desglose por categoría (Buena / Con detalle / No pasa), el calibre configurado y los fps.
 
 Con cámara no hace falta ningún archivo. Con video, el archivo puede estar en cualquier carpeta del equipo.
+
+### Contar las manzanas de una foto
+En el dashboard elige *Foto del equipo* → *Elegir foto…* → *Iniciar conteo*. Se abre la foto con una caja por manzana y el panel de conteo (cualquier tecla la cierra). El total y el desglose quedan en *Último resultado*. Si marcas *Guardar el video con el panel*, la imagen queda en `reports/foto_contada.jpg`.
+
+Desde la terminal:
+```bash
+python -m src.vision.detector --foto ruta/foto.jpg
+python -m src.vision.detector --foto ruta/foto.jpg --sin-ventana --guardar salida.jpg
+```
+Cada detección cuenta como una manzana (no hay tracking en una foto). Las manzanas muy tapadas pueden quedar sin contar. En una foto **no se evalúa el calibre**, porque no se conoce la escala px/mm; la categoría sale solo de color, forma y clase YOLO. El total es siempre la suma de Buena + Con detalle + No pasa.
 
 ### Línea de comandos
 ```bash
 python -m src.vision.detector --modelo models/best.pt --video ruta.mp4 --lote "Lote 1"
 ```
-Opciones: `--linea 0.8` (posición de la línea, fracción del ancho), `--conf 0.25`, `--guardar salida.mp4`, `--sin-ventana`. Sin `--video` usa la fuente de `config.yaml`. Genera `data/02_processed/metricas.csv`.
+Opciones: `--linea 0.8` (posición de la línea, fracción del ancho), `--conf 0.25`, `--guardar salida.mp4`, `--sin-ventana`, `--foto ruta.jpg` (cuenta una sola foto). Sin `--video` ni `--foto` usa la fuente de `config.yaml`. Genera `data/02_processed/metricas.csv`.
+
+**Columnas de `metricas.csv`:** `id, frame, area_px, diametro_mm_est, hue, saturacion, valor, aspecto, clase_yolo`. Solo se escriben filas con detecciones completas (sin oclusión de borde y con segmentación válida). Los notebooks de modelos leen este archivo.
+
+### Validar el conteo contra un conteo manual
+```bash
+python -m src.vision.validar_conteo --video cinta.mp4 --manual 25
+python -m src.vision.validar_conteo --video cinta.mp4 --manual 25 --lineas 0.3,0.5,0.8
+python -m src.vision.validar_conteo --manifiesto reports/verdad_terreno.csv   # columnas: video,conteo_manual
+```
+Compara el conteo automático con el manual y muestra el error por video, el error absoluto medio y el desvío global por posición de línea. Escribe `reports/validacion_conteo.csv` y no toca `metricas.csv`. Hay que usar un **video continuo**: una carpeta de frames sueltos no sirve para validar el tracking.
 
 ### Entrenar el detector
 ```bash
 yolo detect train data=images/data.yaml model=yolo26n.pt epochs=50 patience=15 imgsz=416 batch=16 device=cpu project=runs name=apple_v1
 ```
 Copiar `weights/best.pt` resultante a `models/best.pt`.
+
+### Ver experimentos en MLflow
+Los entrenamientos y la optimización de modelos tabular quedan registrados en `mlflow.db`. Para abrir la UI:
+```bash
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+Luego abre http://localhost:5000 en el navegador. El experimento se llama `applevision-calidad`.
 
 ### Configuración
 Ajustar `config.yaml` (calibre, HSV, `px_por_mm`, fuente de video). **`px_por_mm` hay que calibrarlo** con un objeto de tamaño conocido en cámara: con el valor por defecto las categorías salen casi todas «No pasa», aunque el conteo total es correcto.
@@ -130,7 +174,7 @@ Las detecciones de más corresponden en su mayoría a **manzanas visibles que no
 - Solo 61 imágenes de cinta, todas del mismo video: la prueba es un buen indicio, no una garantía.
 - `valid` es en su mayoría de manzanas apiladas (178 de 190 imágenes), por lo que sus métricas reflejan poco la cinta.
 - Hay 12 imágenes casi duplicadas entre train y valid (fuga menor de datos).
-- El conteo con tracking aún no se valida contra un conteo manual en un video continuo.
+- El conteo con tracking aún no se valida contra un conteo manual en un video continuo (el script `validar_conteo` ya existe; falta un video continuo con su conteo manual).
 
 **Próximos pasos:** completar las etiquetas faltantes en cinta y re-entrenar, quitar duplicados, sumar video propio de la cinta, calibrar `px_por_mm` y validar el conteo contra un conteo manual.
 
@@ -140,10 +184,10 @@ Las detecciones de más corresponden en su mayoría a **manzanas visibles que no
 3. **Preparación de datos:** unificación de clases y fusión de datasets (hecho). Pendiente: features y split final.
 4. **Modelamiento:** YOLO para detección. Después, Random Forest y XGBoost (supervisado) y K-Means (no supervisado) para calificar.
 5. **Evaluación:** mAP, Precision y Recall para detección. F1, AUC, Silhouette y validación cruzada estratificada para calificación.
-6. **Despliegue:** demo en vivo, modelos en S3 y tracking con MLflow. *(Pendiente.)*
+6. **Despliegue:** demo en vivo (dashboard local listo). Tracking con MLflow operativo (`mlflow.db` + `mlruns/`; ver sección [MLflow](#ver-experimentos-en-mlflow)). Subida de modelos a S3 implementada en `s3_helper.py` pero pendiente de usar en producción.
 
 ## Alcance
-Ver `proyecto_manzanas_ml.md`. No clasifica variedad, no calcula peso real, no controla actuadores.
+Ver `ANALISIS_PROYECTO.md` para el análisis detallado del proyecto, diferencias entre el código y la documentación, y hallazgos de riesgo. No clasifica variedad, no calcula peso real, no controla actuadores.
 
 ## Licencias
 YOLO (ultralytics): AGPL-3.0, uso académico.
